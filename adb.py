@@ -9,10 +9,11 @@ import sqlite3
 from time import sleep
 import subprocess
 import re
-import sys
+import sys 
 import requests
 import aiohttp
 import aiofiles
+import asyncio
 
 # 获取剪切板内容
 
