@@ -3,7 +3,7 @@
 '''
 Author: whalefall
 Date: 2021-07-03 21:13:26
-LastEditTime: 2021-07-03 23:18:02
+LastEditTime: 2021-07-03 23:20:23
 Description: 异步&多线程下载抖音无水印视频
 '''
 import asyncio
@@ -147,6 +147,6 @@ if __name__ == "__main__":
 
     print("一共有%s条视频,等待3s后下载" % (len(videoList)))
 
-    with ThreadPoolExecutor() as pool2:
+    with ThreadPoolExecutor(max_workers=256) as pool2:
         for video in videoList:
             pool2.submit(do_load_media, video, path)
