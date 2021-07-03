@@ -3,7 +3,7 @@
 '''
 Author: whalefall
 Date: 2021-07-02 19:53:05
-LastEditTime: 2021-07-03 17:06:22
+LastEditTime: 2021-07-03 21:04:56
 Description: 提取 sqlite 数据库里面的链接,通过多线程技术(生产者消费者模型)下载,抖音去水印不依赖外部api
 '''
 import sqlite3
@@ -40,7 +40,6 @@ def do_load_media(url, path):
             # 若文件已经存在，则断点续传，设置接收来需接收数据的位置
             if os.path.exists(path):
                 headers['Range'] = 'bytes=%d-' % os.path.getsize(path)
-
             res = requests.get(url, stream=True, headers=headers)
             content_length = int(res.headers['content-length'])
 
@@ -102,7 +101,7 @@ def getVideo(url_queue: queue.Queue, video_queue: queue.Queue):
     '''
     # 不断循环
     while True:
-        share_url = url_queue.get()
+        share_url = url_queue.get(timeout=3)
         result = Dy().main(share_url)
 
         if result["status"] == 1:
@@ -124,15 +123,22 @@ def download_video(url_queue: queue.Queue, video_queue: queue.Queue, table_name)
     '''
     # 不断循环
     while True:
-        v_tuple = video_queue.get()
-        url = v_tuple[0]
-        desc = v_tuple[1]
-        mkdirInPath(table_name)
-        path = os.path.join(sys.path[0]+"//%s" % (table_name),
-                            checkNameValid(desc)+".mp4")
-        do_load_media(url, path)  # 下载视频
-        print("消费者线程%s: 链接队列数量:%s 视频队列数量:%s" % (
-            threading.current_thread().name, url_queue.qsize(), video_queue.qsize()))
+        try:
+            v_tuple = video_queue.get(block=False,timeout=3)
+
+        except Exception as e:
+            import time
+            time.sleep(3)
+            print(e)
+        else:
+            url = v_tuple[0]
+            desc = v_tuple[1]
+            mkdirInPath(table_name)
+            path = os.path.join(sys.path[0]+"//%s" % (table_name),
+                                checkNameValid(desc)+".mp4")
+            do_load_media(url, path)  # 下载视频
+            print("消费者线程%s: 链接队列数量:%s 视频队列数量:%s" % (
+                threading.current_thread().name, url_queue.qsize(), video_queue.qsize()))
 
 
 if __name__ == "__main__":
@@ -145,13 +151,13 @@ if __name__ == "__main__":
         url_queue.put(url)
 
     # 创建获取链接线程
-    for idx in range(64):
+    for idx in range(5):
         t = threading.Thread(target=getVideo, args=(
             url_queue, video_queue), name=idx)
         t.start()
 
     # 创建下载视频线程
-    for idx1 in range(256):
+    for idx1 in range(5):
         t = threading.Thread(target=download_video, args=(
             url_queue, video_queue, table_name), name=idx1)
         t.start()
