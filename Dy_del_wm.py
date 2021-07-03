@@ -3,7 +3,7 @@
 '''
 Author: whalefall
 Date: 2021-07-03 13:45:27
-LastEditTime: 2021-07-03 15:24:55
+LastEditTime: 2021-07-03 17:28:43
 Description: 抖音去水印函数文件
 '''
 import re
@@ -56,24 +56,29 @@ class Dy(object):
             return {"status": 1, "why": "抖音官方无水印api出现问题"}
 
         # 视频信息
-        video = {}
-        video["desc"] = api_resp["item_list"][0]["desc"]  # 视频文案
-        # 视频封面图
-        video["video_pic"] = api_resp["item_list"][0]["video"]["cover"]["url_list"][0]
-        # 视频无水印链接(需要用手机UA访问)
-        video["video_url"] = api_resp["item_list"][0]["video"]["play_addr"]["url_list"][0].replace(
-            "wm", "")
-        video["video_mp3"] = api_resp["item_list"][0]["music"]["play_url"]["url_list"][0]
+        try:
+            video = {}
+            video["desc"] = api_resp["item_list"][0]["desc"]  # 视频文案
+            # 视频封面图
+            video["video_pic"] = api_resp["item_list"][0]["video"]["cover"]["url_list"][0]
+            # 视频无水印链接(需要用手机UA访问)
+            video["video_url"] = api_resp["item_list"][0]["video"]["play_addr"]["url_list"][0].replace(
+                "wm", "")
+            video["video_mp3"] = api_resp["item_list"][0]["music"]["play_url"]["url_list"][0]
 
-        # 作者信息
-        author = {}
-        author["name"] = api_resp["item_list"][0]["author"]["nickname"]
-        author["avatar"] = api_resp["item_list"][0]["author"]["avatar_larger"]["url_list"][0]
-        author["sign"] = api_resp["item_list"][0]["author"]["signature"]
+            # 作者信息
+            author = {}
+            author["name"] = api_resp["item_list"][0]["author"]["nickname"]
+            author["avatar"] = api_resp["item_list"][0]["author"]["avatar_larger"]["url_list"][0]
+            author["sign"] = api_resp["item_list"][0]["author"]["signature"]
 
-        datas = {"video": video, "author": author}
+            datas = {"video": video, "author": author}
 
-        return {"status": 0, "data": datas}
+            return {"status": 0, "data": datas}
+        except Exception as e:
+            with open("dy.log", "a") as f:
+                f.write("id:%s 错误:%s 原始数据:%s \n" %
+                        (str(video_id), str(e), str(api_resp)))
 
     # 主运行
     def main(self, content) -> dict:
