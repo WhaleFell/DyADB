@@ -3,7 +3,7 @@
 '''
 Author: whalefall
 Date: 2021-07-03 13:45:27
-LastEditTime: 2021-07-03 17:28:43
+LastEditTime: 2021-07-04 12:14:50
 Description: 抖音去水印函数文件
 '''
 import re
@@ -33,9 +33,9 @@ class Dy(object):
 
             full_url = requests.get(
                 url, headers={"User-Agent": random.choice(self.UAlist)}).url
-
             video_id = re.findall('video/(\d+)/', str(full_url))[0]
         except Exception as e:
+            print("[API]抖音解析错误:%s" % (e))
             return None
         else:
             return video_id
@@ -64,6 +64,10 @@ class Dy(object):
             # 视频无水印链接(需要用手机UA访问)
             video["video_url"] = api_resp["item_list"][0]["video"]["play_addr"]["url_list"][0].replace(
                 "wm", "")
+            # 如需获取视频重定向后的链接请开启这个(可能会造成解析速度下降)
+            # video["video_url"] = requests.get(
+            #     url, headers={"User-Agent": random.choice(self.UAlist)}).url
+
             video["video_mp3"] = api_resp["item_list"][0]["music"]["play_url"]["url_list"][0]
 
             # 作者信息
@@ -83,6 +87,7 @@ class Dy(object):
     # 主运行
     def main(self, content) -> dict:
         video_id = self.get_video_id(content)
+        # print(video_id)
         video_dict = self.get_video_all(video_id)
         # print(video_dict)
         return video_dict

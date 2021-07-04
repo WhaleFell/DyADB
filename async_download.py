@@ -3,7 +3,7 @@
 '''
 Author: whalefall
 Date: 2021-07-03 21:13:26
-LastEditTime: 2021-07-04 00:18:09
+LastEditTime: 2021-07-04 12:56:34
 Description: 异步&多线程下载抖音无水印视频
 '''
 import asyncio
@@ -19,6 +19,8 @@ import threading
 import re
 import requests
 import time
+import traceback
+import random
 
 
 def checkNameValid(name=None):
@@ -37,7 +39,7 @@ def checkNameValid(name=None):
     return name
 
 
-def do_load_media(video: tuple, path):
+def do_load_media(video: tuple, path_raw):
     '''
     传入链接和路径下载视频,支持断点续传.
     path: 路径不包含文件
@@ -50,34 +52,47 @@ def do_load_media(video: tuple, path):
 
     file_name = checkNameValid(video_desc)
 
-    path_full = os.path.join(path, "%s.mp4" % (file_name))
+    path = os.path.join(path_raw, "%s.mp4" % (file_name))
 
     try:
+        s_t = time.time()
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.98 Safari/537.36'}
+            'User-Agent': random.choice(Dy().UAlist),
+        }
         pre_content_length = 0
         # 循环接收视频数据
         while True:
             # 若文件已经存在，则断点续传，设置接收来需接收数据的位置
             if os.path.exists(path):
                 headers['Range'] = 'bytes=%d-' % os.path.getsize(path)
-            res = requests.get(url, stream=True, headers=headers)
 
-            content_length = int(res.headers['content-length'])
+            res = requests.get(video_url, stream=True, headers=headers)
+
+            # 获取到的总长度
+
+            content_length = int(res.headers['Content-Length'])
             # 若当前报文长度小于前次报文长度，或者已接收文件等于当前报文长度，则可以认为视频接收完成
-            # if content_length < pre_content_length or (
-            #         os.path.exists(path) and os.path.getsize(path) == content_length) or content_length == 0:
-            #     break
+            if content_length < pre_content_length or (
+                    os.path.exists(path) and os.path.getsize(path) == content_length) or content_length == 0:
+                break
             pre_content_length = content_length
 
             # 写入收到的视频数据
             with open(path, 'ab') as file:
                 file.write(res.content)
                 file.flush()
-                print('下载成功,file size:%d total size:%d' %
-                      (os.path.getsize(path), content_length))
+                # 下载进度
+        e_t = time.time()
+
+        print("文件:%s.mp4 下载完成:%.3fM 用时:%.2f" %
+              (video_desc, os.path.getsize(path)/1024/1024, e_t-s_t))
+
     except Exception as e:
-        print("出现错误:", e, video_url)
+
+        print(res.status_code, traceback.format_exc())
+        print("重试")
+        # 这样会导致 path 不断叠加.
+        do_load_media(video, path_raw)
 
 
 def readSql(table_name) -> list:
@@ -129,7 +144,7 @@ def mkdirInPath(name):
 
 if __name__ == "__main__":
 
-    table_name = "qinlanlan"
+    table_name = "common"
     mkdirInPath(table_name)
     # video_queue = queue.Queue()
     videoList = []
@@ -141,9 +156,11 @@ if __name__ == "__main__":
 
     print("一共有%s条视频,等待3s后下载" % (len(videoList)))
 
-    # with ThreadPoolExecutor(max_workers=64) as pool2:
-    #     for video in videoList:
-    #         # print(video)
-    #         pool2.submit(do_load_media, video, path)
-    for video in videoList:
-        do_load_media(video, path)
+    with ThreadPoolExecutor() as pool2:
+        for video in videoList:
+            # print(video)
+            pool2.submit(do_load_media, video, path)
+
+    # 测试
+    # for video in videoList:
+    #     do_load_media(video, path)
