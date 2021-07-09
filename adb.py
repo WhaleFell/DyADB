@@ -2,31 +2,36 @@
 Author: whalefall
 Date: 2021-06-29 18:04:27
 LastEditTime: 2021-06-30 16:11:03
-Description: 抖音adb
+Description: 抖音adb自动刷,实现两个线程,一个线程负责下载,一个线程负责调动adb.
 '''
+from Dy_del_wm import Dy
 import os
 import sqlite3
 from time import sleep
 import subprocess
 import re
-import sys 
+import sys
+from urllib.parse import quote
 import requests
-import aiohttp
-import aiofiles
-import asyncio
-
+import threading
+import queue
+import time
+from concurrent.futures import ThreadPoolExecutor
 # 获取剪切板内容
 
 
-def getCopy() -> tuple:
+def getCopy():
+    '''
+    获取剪贴板内容,返回(文案,链接)
+    '''
     try:
+        # 开启另一个管道运行获取剪切板内容
         c = subprocess.check_output(
             'adb shell am broadcast -a clipper.get').decode()
-        # print(c)
-        if "found" in c:
-            print("手机连接掉线!")
-            sys.exit()
-        pat = re.compile(r"[a-zA-z]+://[^\s]*")
+
+        # 匹配网址的正则表达式
+        re_str = "/^(((ht|f)tps?):\/\/)?[\w-]+(\.[\w-]+)+([\w.,@?^=%&:/~+#-]*[\w@?^=%&/~+#-])?$/"
+        pat = re.compile(re_str)
         url = pat.findall(c)[0]
         # print(url)
 
@@ -45,11 +50,15 @@ def getCopy() -> tuple:
 
 
 def writeSQL(Text, Url, tableName="common"):
+    '''
+    读写sqlite数据库
+    '''
     conn = sqlite3.connect("dy.db")
     c = conn.cursor()
 
     # 新建表
-    c.execute('''create table if not exists `{}` (
+    c.execute('''
+    create table if not exists `{}` (
         `Text` varchar(225),
         `Url` varchar(225),
         primary key(`Text`)
@@ -75,61 +84,13 @@ def writeSQL(Text, Url, tableName="common"):
         return "1"
 
 
-# 利用个人搭建的API下载.
-def download_videofile(video_link, file_name):
-    file_name = checkNameValid(file_name)
-    # file_name = link.split('/')[-1]
-    # print("文件下载:%s" % file_name)
-    r = requests.get(video_link, stream=True).iter_content(
-        chunk_size=1024 * 1024)
-    with open(os.path.join(sys.path[0]+"\\qinlanlan", "%s.mp4" % (file_name)), 'wb') as f:
-        for chunk in r:
-            if chunk:
-                f.write(chunk)
-
-    print("[下载完成!]%s.mp4" % file_name)
-
-    return
-
-
-def DownloadVidoe(url, text):
-    header = {
-        "User-Agent": "Mozilla/5.0 (Linux; U; Android 8.1.0; zh-cn; BLA-AL00 Build/HUAWEIBLA-AL00) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/57.0.2987.132 MQQBrowser/8.9 Mobile Safari/537.36",
-    }
-    api = "http://192.168.101.4:5000/dy/?url=%s" % (url)
-    resp = requests.get(api).json()
-    url = resp.get('video_url')
-    title = resp.get('title')
-    # 如果文案为空就取分享连接的文字
-    if title == "":
-        title = text
-
-    if url == "0":
-        print("视频解析出现错误!")
-        return None
-    download_videofile(url, title)
-
-
-# 检查文件名
-def checkNameValid(name=None):
-    """
-    检测Windows文件名称！
-    """
-    if name is None:
-        print("name is None!")
-        return
-    reg = re.compile(r'[\\/:*?"<>|\r\n]+')
-    valid_name = reg.findall(name)
-    if valid_name:
-        for nv in valid_name:
-            name = name.replace(nv, "_")
-    return name
-
 # 若检测到有多次重复的情况 -> 即 点击失误/加载过长/剪切板服务挂了 重新打开app
 
 
 def restartDyApp():
-
+    '''
+    重新打开抖音app
+    '''
     # 启动剪切板服务
     os.system("adb shell am startservice ca.zgrs.clipper/.ClipboardService")
 
@@ -160,9 +121,99 @@ def restartDyApp():
     return
 
 
+def do_load_media(url, path):
+    '''
+    传入链接和路径下载视频,支持断点续传.
+    抄袭自: https://blog.csdn.net/kuangshp128/article/details/86012288
+    '''
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_2) AppleWebKit/537.36 (KHTML, like Gecko)'}
+        pre_content_length = 0
+        # 循环接收视频数据
+        while True:
+            # 若文件已经存在，则断点续传，设置接收来需接收数据的位置
+            if os.path.exists(path):
+                headers['Range'] = 'bytes=%d-' % os.path.getsize(path)
+            res = requests.get(url, stream=True, headers=headers)
+            content_length = int(res.headers['content-length'])
+
+            # 若当前报文长度小于前次报文长度，或者已接收文件等于当前报文长度，则可以认为视频接收完成
+            if content_length < pre_content_length or (
+                    os.path.exists(path) and os.path.getsize(path) == content_length) or content_length == 0:
+                break
+
+            pre_content_length = content_length
+
+            # 写入收到的视频数据
+            with open(path, 'ab') as file:
+                file.write(res.content)
+                file.flush()
+                print('%s下载成功,file size : %dtotal size:%d' %
+                      (path, os.path.getsize(path), content_length))
+    except Exception as e:
+        print("视频%s下载错误:%s" % (path, e))
+
+
+def checkNameValid(name=None):
+    """
+    检测Windows文件名称！
+    抄袭自: https://blog.csdn.net/tianzhaixing2013/article/details/53184934
+    """
+    if name is None:
+        print("name is None!")
+        return
+    reg = re.compile(r'[\\/:*?"<>|\r\n]+')
+    valid_name = reg.findall(name)
+    if valid_name:
+        for nv in valid_name:
+            name = name.replace(nv, "_")
+    return name
+
+
+def downloadVidoe(path_dir):
+    '''
+    不断获取队列中的视频信息元组下载视频.
+    '''
+
+    while True:
+        try:
+            videoTuple = video_queue.get(timeout=3)
+            video_text = videoTuple[0]
+            video_url = videoTuple[1]
+            api_json = Dy().main(video_url)
+            name = api_json["video"]["desc"]
+            name = checkNameValid(name)
+            url = api_json["video"]["video_url"]
+            path_full = os.path.join(path_full, "%s.mp4" % (name))
+            do_load_media(url, path_full)
+            video_queue.task_done()
+        except queue.Empty:
+            print("空")
+            continue
+        except Exception as e:
+            print("线程%s出现异常%s" % (threading.current_thread().name, e))
+        finally:
+            # video_queue.task_done()
+            pass
+
+
 if __name__ == "__main__":
     # 数据重复计数器
     count = 0
+    # 复制视频链接队列
+
+    video_queue = queue.Queue()
+
+    # with ThreadPoolExecutor(max_workers=3) as pool:
+    #     for i in range(3):
+    #         pool.submit(downloadVidoe,os.path.join(sys.path[0],"common"))
+    
+    t = threading.Thread(target=downloadVidoe, args=(
+        os.path.join(sys.path[0], "common"),))
+    t.setDaemon(False)
+    t.start()
+
     while True:
 
         # 点击分享按钮
@@ -175,10 +226,9 @@ if __name__ == "__main__":
         text, url = getCopy()
         sql_result = writeSQL(Text=text, Url=url)
 
-        # try:
-        #     DownloadVidoe(url, text)
-        # except Exception as e:
-        #     print("视频下载出错:%s" % (e))
+        # 没有与数据库中的重复就提交到队列
+        if sql_result == "1":
+            video_queue.put((text, url))
 
         if count >= 3:
             print("数据已重复三次,准备重启 抖音APP")
