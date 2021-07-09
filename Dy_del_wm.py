@@ -3,10 +3,11 @@
 '''
 Author: whalefall
 Date: 2021-07-03 13:45:27
-LastEditTime: 2021-07-09 01:30:55
+LastEditTime: 2021-07-09 18:54:25
 Description: 抖音去水印函数文件
 '''
 import re
+import traceback
 import requests
 import random
 
@@ -82,7 +83,7 @@ class Dy(object):
         except Exception as e:
             with open("dy.log", "a") as f:
                 f.write("id:%s 错误:%s 原始数据:%s \n" %
-                        (str(video_id), str(e), str(api_resp)))
+                        (str(video_id), traceback.format_exc(), str(api_resp)))
 
     # 主运行
     def main(self, content) -> dict:

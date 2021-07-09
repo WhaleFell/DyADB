@@ -16,6 +16,7 @@ import requests
 import threading
 import queue
 import time
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 # 获取剪切板内容
 
@@ -29,10 +30,10 @@ def getCopy():
         c = subprocess.check_output(
             'adb shell am broadcast -a clipper.get').decode()
 
+        print(c)
         # 匹配网址的正则表达式
-        re_str = "/^(((ht|f)tps?):\/\/)?[\w-]+(\.[\w-]+)+([\w.,@?^=%&:/~+#-]*[\w@?^=%&/~+#-])?$/"
-        pat = re.compile(re_str)
-        url = pat.findall(c)[0]
+        pat = re.compile(r"[a-zA-z]+://[^\s]*")
+        url = pat.search(c)[0]
         # print(url)
 
         pat2 = re.compile(r"([\u4e00-\u9fa5].*?[\u4e00-\u9fa5])")
@@ -182,17 +183,18 @@ def downloadVidoe(path_dir):
             video_text = videoTuple[0]
             video_url = videoTuple[1]
             api_json = Dy().main(video_url)
-            name = api_json["video"]["desc"]
+            name = api_json["data"]["video"]["desc"]
             name = checkNameValid(name)
-            url = api_json["video"]["video_url"]
-            path_full = os.path.join(path_full, "%s.mp4" % (name))
+            url = api_json["data"]["video"]["video_url"]
+            path_full = os.path.join(path_dir, "%s.mp4" % (name))
             do_load_media(url, path_full)
             video_queue.task_done()
         except queue.Empty:
-            print("空")
+            # print("空")
             continue
         except Exception as e:
-            print("线程%s出现异常%s" % (threading.current_thread().name, e))
+            print("线程%s出现异常%s" %
+                  (threading.current_thread().name, traceback.format_exc()))
         finally:
             # video_queue.task_done()
             pass
@@ -205,20 +207,27 @@ if __name__ == "__main__":
 
     video_queue = queue.Queue()
 
-    # with ThreadPoolExecutor(max_workers=3) as pool:
-    #     for i in range(3):
+    # with ThreadPoolExecutor(max_workers=5) as pool:
+    #     for i in range(6):
     #         pool.submit(downloadVidoe,os.path.join(sys.path[0],"common"))
-    
-    t = threading.Thread(target=downloadVidoe, args=(
-        os.path.join(sys.path[0], "common"),))
-    t.setDaemon(False)
-    t.start()
 
+    # print("Main")
+    threadList = [
+        threading.Thread(target=downloadVidoe, args=(
+            os.path.join(sys.path[0], "common"),), name=i)
+        for i in range(6)
+    ]
+
+    for thread_ in threadList:
+        thread_.setDaemon(True)
+        thread_.start()
+
+    status_lock = 0 # 打算设置机制
     while True:
 
         # 点击分享按钮
         os.system("adb shell input tap 998 1296")
-        sleep(0.2)
+        sleep(0.1)
         # 点击复制链接按钮
         os.system("adb shell input tap 154 1492")
         # sleep(0.2)
@@ -226,11 +235,12 @@ if __name__ == "__main__":
         text, url = getCopy()
         sql_result = writeSQL(Text=text, Url=url)
 
-        # 没有与数据库中的重复就提交到队列
+        # 没有与数据库中的重复就提交到队列,并调整状态锁
         if sql_result == "1":
             video_queue.put((text, url))
+            status_lock = 0
 
-        if count >= 3:
+        if count >= 10:
             print("数据已重复三次,准备重启 抖音APP")
             restartDyApp()
             # 还原计数器
@@ -242,3 +252,5 @@ if __name__ == "__main__":
 
         # 下滑
         os.system("adb shell input swipe 520 1400 536 599")
+
+    # print(getCopy())
